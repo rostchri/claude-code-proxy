@@ -73,6 +73,10 @@ class ClaudeRequest {
             delete item.cache_control.ttl;
             Logger.debug('Removed ttl from cache_control');
           }
+          if (item.cache_control.scope) {
+            delete item.cache_control.scope;
+            Logger.debug('Removed scope from cache_control');
+          }
         }
       });
     };
@@ -333,19 +337,26 @@ class ClaudeRequest {
   processRequestBody(body, presetName = null) {
     if (!body) return body;
 
-    const systemPrompt = {
-      type: 'text',
-      text: 'You are Claude Code, Anthropic\'s official CLI for Claude.'
-    };
+    // Skip system prompt injection for Haiku models
+    const isHaiku = body.model && body.model.toLowerCase().includes('haiku');
 
-    if (body.system) {
-      if (Array.isArray(body.system)) {
-        body.system.unshift(systemPrompt);
+    if (!isHaiku) {
+      const systemPrompt = {
+        type: 'text',
+        text: 'You are Claude Code, Anthropic\'s official CLI for Claude.'
+      };
+
+      if (body.system) {
+        if (Array.isArray(body.system)) {
+          body.system.unshift(systemPrompt);
+        } else {
+          body.system = [systemPrompt, { type: 'text', text: body.system }];
+        }
       } else {
-        body.system = [systemPrompt, body.system];
+        body.system = [systemPrompt];
       }
     } else {
-      body.system = [systemPrompt];
+      Logger.debug('Skipping Claude Code system prompt for Haiku model');
     }
 
     if (presetName) {
