@@ -6,6 +6,7 @@ const ClaudeRequest = require('./ClaudeRequest');
 const Logger = require('./Logger');
 const OAuthManager = require('./OAuthManager');
 const { exec } = require('child_process');
+const RequestRecorder = require('./RequestRecorder');
 
 let config = {};
 
@@ -29,7 +30,7 @@ function loadConfig() {
   try {
     const configPath = path.join(__dirname, 'config.txt');
     const configFile = fs.readFileSync(configPath, 'utf8');
-    
+
     configFile.split('\n').forEach(line => {
       const trimmed = line.trim();
       if (trimmed && !trimmed.startsWith('#')) {
@@ -39,9 +40,10 @@ function loadConfig() {
         config[key.trim()] = commentIndex >= 0 ? value.substring(0, commentIndex).trim() : value;
       }
     });
-    
+
     Logger.init(config);
-    
+    RequestRecorder.init(config);
+
     Logger.info('Config loaded from config.txt');
   } catch (error) {
     Logger.error('Failed to load config:', error.message);
@@ -255,20 +257,29 @@ async function handleRequest(req, res) {
     res.end(JSON.stringify({ status: 'ok', server: 'claude-code-proxy', timestamp: Date.now() }));
     return;
   }
-  
+
   if (req.method === 'POST' && (pathname === '/v1/messages' || pathname.match(/^\/v1\/\w+\/messages$/))) {
     try {
       Logger.debug('Incoming request headers:', JSON.stringify(req.headers, null, 2));
       const body = await parseBody(req);
       Logger.debug(`Claude request body (${JSON.stringify(body).length} bytes):`, JSON.stringify(body, null, 2));
-      
+
       let presetName = null;
       const presetMatch = pathname.match(/^\/v1\/(\w+)\/messages$/);
       if (presetMatch) {
         presetName = presetMatch[1];
         Logger.debug(`Detected preset: ${presetName}`);
       }
-      
+
+      const recording = RequestRecorder.begin({
+        method: req.method,
+        path: pathname,
+        preset: presetName,
+        clientIP,
+        headers: req.headers,
+        body,
+      });
+      RequestRecorder.instrumentResponse(res, recording);
       await new ClaudeRequest(req).handleResponse(res, body, presetName);
     } catch (error) {
       Logger.error('Request error:', error.message);
@@ -277,8 +288,8 @@ async function handleRequest(req, res) {
     }
     return;
   }
-  
-  
+
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
 }
