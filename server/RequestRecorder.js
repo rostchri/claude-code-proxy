@@ -109,21 +109,25 @@ class RequestRecorder {
       return;
     }
     const MAX_BYTES = 8 * 1024 * 1024; // bound memory for very large responses
-    let captured = '';
+    // Accumulate raw Buffers and decode ONCE at the end. Decoding per-chunk
+    // (chunk.toString('utf8')) corrupts any multi-byte UTF-8 sequence split
+    // across a stream chunk boundary into U+FFFD, so the recorded response
+    // would show mojibake even when the forwarded bytes were intact.
+    const capturedChunks = [];
     let capturedBytes = 0;
     const append = (chunk) => {
       if (chunk == null || capturedBytes >= MAX_BYTES) {
         return;
       }
-      let s = '';
+      let buf = null;
       if (Buffer.isBuffer(chunk)) {
-        s = chunk.toString('utf8');
+        buf = chunk;
       } else if (typeof chunk === 'string') {
-        s = chunk;
+        buf = Buffer.from(chunk, 'utf8');
       }
-      if (s) {
-        captured += s;
-        capturedBytes += Buffer.byteLength(s);
+      if (buf && buf.length) {
+        capturedChunks.push(buf);
+        capturedBytes += buf.length;
       }
     };
 
@@ -145,7 +149,7 @@ class RequestRecorder {
         streaming: contentType.includes('text/event-stream'),
         headers: res.getHeaders(),
         contentType,
-        rawBody: captured,
+        rawBody: Buffer.concat(capturedChunks).toString('utf8'),
       });
     };
     res.on('finish', record);

@@ -54,12 +54,17 @@ function loadConfig() {
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
+    // Collect raw chunks and decode ONCE. Decoding per-chunk (chunk.toString())
+    // corrupts any multi-byte UTF-8 sequence (e.g. an emoji) split across a
+    // chunk boundary, turning it into U+FFFD replacement characters in the
+    // parsed body — which is then forwarded upstream to the model.
+    const chunks = [];
     req.on('data', chunk => {
-      body += chunk.toString();
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
     req.on('end', () => {
       try {
+        const body = Buffer.concat(chunks).toString('utf8');
         resolve(body ? JSON.parse(body) : {});
       } catch (error) {
         reject(new Error(`Invalid JSON: ${error.message}`));
