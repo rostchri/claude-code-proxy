@@ -265,9 +265,10 @@ class ClaudeRequest {
 
       const response = await new Promise((resolve, reject) => {
         const req = https.request(options, (res) => {
-          let responseData = '';
-          res.on('data', chunk => responseData += chunk);
+          const responseChunks = [];
+          res.on('data', chunk => responseChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
           res.on('end', () => {
+            const responseData = Buffer.concat(responseChunks).toString('utf8');
             try {
               const response = JSON.parse(responseData);
               if (res.statusCode === 200) {
@@ -563,9 +564,13 @@ class ClaudeRequest {
     } else {
       res.removeHeader('content-encoding');
 
-      let responseData = '';
+      // Accumulate raw Buffers and decode ONCE at the end. `responseData += chunk`
+      // coerced each Buffer to a UTF-8 string per chunk, which corrupts any
+      // multi-byte sequence split across a stream chunk boundary into U+FFFD
+      // (e.g. an em-dash e2 80 94 becomes two replacement chars).
+      const responseChunks = [];
       claudeResponse.on('data', chunk => {
-        responseData += chunk;
+        responseChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       });
 
       claudeResponse.on('error', (err) => {
@@ -579,6 +584,7 @@ class ClaudeRequest {
       });
 
       claudeResponse.on('end', () => {
+        const responseData = Buffer.concat(responseChunks).toString('utf8');
         Logger.debug(`Non-streaming response (${claudeResponse.statusCode}): ${responseData.substring(0, 500)}`);
         try {
           const jsonData = JSON.parse(responseData);
